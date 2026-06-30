@@ -1,0 +1,76 @@
+name: browse-local-site
+target: "http://127.0.0.1:8080"
+
+# Глобальные ограничения (Limits)
+limits:
+  duration_seconds: 60
+  max_requests: 150
+  max_rps: 2
+  virtual_users: 2
+
+# Условия аварийной остановки (Kill Switch)
+stop_conditions:
+  error_rate_percent: 20
+  status_429_count: 5
+  p95_latency_ms: 3000
+
+steps:
+  # Базовый GET-запрос (Простая проверка главной страницы)
+  - request:
+      method: GET
+      path: "/"
+    pause_ms:
+      min: 200
+      max: 500
+
+  # Расширенный GET-запрос
+  - request:
+      method: GET
+      path: "/api/v1/items"
+      query:
+        category: "books"
+        limit: "10"
+      headers:
+        Accept: "application/json"
+        X-Client-Type: "AsyncGenerator"
+      cookies:
+        session_token: "session_id_xyz123"
+    expect:
+      status:
+        - 200
+    pause_ms:
+      min: 400
+      max: 800
+
+  # Базовый GET-запрос с проверкой нескольких статусов
+  - request:
+      method: GET
+      path: "/api/profile"
+    expect:
+      status:
+        - 200
+        - 401
+    pause_ms:
+      min: 300
+      max: 600
+
+  # Расширенный POST-запрос
+  - request:
+      method: POST
+      path: "/api/v1/data"
+      query:
+        sync: "true"
+      headers:
+        Content-Type: "application/json"
+        X-Custom-Header: "SecureGeneratorV1"
+      cookies:
+        session_token: "session_id_xyz123"
+        user_role: "tester"
+      body: '{"status": "active", "payload": {"test_id": 42}}' # JSON-строка
+    expect:
+      status:
+        - 200
+        - 201
+    pause_ms:
+      min: 500
+      max: 1000

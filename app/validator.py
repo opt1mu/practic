@@ -1,5 +1,7 @@
 import socket
 from urllib.parse import urlparse
+from typing import Dict, List, Optional
+from pydantic import BaseModel, Field, model_validator
 
 class SecurityValidationError(Exception):
     # кастомный класс ошибки для фиксации нарушений безопасности
@@ -73,3 +75,49 @@ class TargetValidator:
         # обязательный запуск сквозной проверки безопасности для полученного адреса редиректа
         self.validate_target_url(redirect_url)
         return redirect_url
+
+class PauseModel(BaseModel):
+    min: int = Field(..., ge=0)
+    max: int = Field(..., ge=0)
+
+class ExpectModel(BaseModel):
+    # Если статус не указан, по умолчанию ждем 200
+    status: List[int] = Field(default=[200])
+
+class RequestModel(BaseModel):
+    method: str = Field(default="GET")
+    path: str
+    query: Optional[Dict[str, str]] = None
+    headers: Optional[Dict[str, str]] = None
+    cookies: Optional[Dict[str, str]] = None
+    body: Optional[str] = None
+
+    @model_validator(mode='after')
+    def validate_get_body(self) -> 'RequestModel':
+        # Проверяем, что у GET-запроса нет тела (body)
+        if self.method.upper() == "GET" and self.body is not None:
+            raise ValueError("Метод GET не может содержать body.")
+        return self
+
+class StepModel(BaseModel):
+    request: RequestModel
+    expect: ExpectModel = Field(default_factory=ExpectModel)
+    pause_ms: PauseModel
+
+class LimitsModel(BaseModel):
+    duration_seconds: int
+    max_requests: int
+    max_rps: int = Field(..., le=20) # Тот самый жесткий предел из задания
+    virtual_users: int = Field(..., le=20)
+
+class StopConditionsModel(BaseModel):
+    error_rate_percent: int
+    status_429_count: int
+    p95_latency_ms: int
+
+class ScenarioModel(BaseModel):
+    name: str
+    target: str
+    limits: LimitsModel
+    stop_conditions: StopConditionsModel
+    steps: List[StepModel]
