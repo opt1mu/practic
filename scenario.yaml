@@ -6,7 +6,7 @@ limits:
   duration_seconds: 60
   max_requests: 150
   max_rps: 2
-  virtual_users: 2
+  virtual_users: 5
 
 # Условия аварийной остановки (Kill Switch)
 stop_conditions:
