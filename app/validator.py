@@ -117,6 +117,9 @@ class LoadProfileModel(BaseModel):
     type: Literal["uniform", "stepped", "spike"]
     step_duration_sec: Optional[int] = None
     step_rps: Optional[int] = None
+    spike_start_sec: Optional[int] = None
+    spike_duration_sec: Optional[int] = None
+    spike_rps: Optional[int] = None
 
 class ScenarioModel(BaseModel):
     name: str

@@ -3,16 +3,20 @@ target: "http://127.0.0.1:8080"
 
 # Выбор профиля нагрузки
 load_profile:
-  type: "uniform" # варианты: uniform (равномерный), stepped (ступенчатый), spike (всплеск)
+  type: "stepped" # варианты: uniform (равномерный), stepped (ступенчатый), spike (всплеск)
 
   step_duration_sec: 2
   step_rps: 5
+
+  spike_start_sec: 15
+  spike_duration_sec: 5
+  spike_rps: 20
 
 # Глобальные ограничения (Limits)
 limits:
   duration_seconds: 60
   max_requests: 150
-  max_rps: 10
+  max_rps: 5
   virtual_users: 20
 
 # Условия аварийной остановки (Kill Switch)

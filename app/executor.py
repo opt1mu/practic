@@ -54,6 +54,7 @@ async def rps_scheduler(rps_queue: asyncio.Queue, scenario: ScenarioModel, stop_
     start_time = time.time()
     duration = scenario.limits.duration_seconds
     profile = scenario.load_profile
+    max_limit = 20
 
     next_token_time = time.time()
 
@@ -64,11 +65,20 @@ async def rps_scheduler(rps_queue: asyncio.Queue, scenario: ScenarioModel, stop_
         elapsed = time.time() - start_time
 
         if profile.type == "stepped":
-            step_duration = profile.step_duration_sec or 5
-            step_increase = profile.step_rps or 2
+            step_duration = profile.step_duration_sec
+            step_increase = profile.step_rps
             current_step = int(elapsed // step_duration)
-            target_rps = step_increase + (current_step * step_increase)
-            current_rps = min(target_rps, 20)
+            current_rps = min(step_increase + (current_step * step_increase), max_limit)
+
+        elif profile.type == "spike":
+            start = profile.spike_start_sec
+            dur = profile.spike_duration_sec
+            target = profile.spike_rps
+            if start <= elapsed < (start + dur):
+                current_rps = target
+            else:
+                current_rps = scenario.limits.max_rps
+
         else:
             current_rps = scenario.limits.max_rps
 
@@ -76,7 +86,6 @@ async def rps_scheduler(rps_queue: asyncio.Queue, scenario: ScenarioModel, stop_
         next_token_time += interval
 
         sleep_time = next_token_time - time.time()
-
         if sleep_time > 0:
             await asyncio.sleep(sleep_time)
         else:
