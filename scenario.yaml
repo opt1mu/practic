@@ -1,11 +1,15 @@
 name: browse-local-site
 target: "http://127.0.0.1:8080"
 
+# Выбор профиля нагрузки
+load_profile:
+  type: "stepped" # варианты: uniform (равномерный), stepped (ступенчатый), spike (всплеск)
+
 # Глобальные ограничения (Limits)
 limits:
   duration_seconds: 60
   max_requests: 150
-  max_rps: 2
+  max_rps: 10
   virtual_users: 5
 
 # Условия аварийной остановки (Kill Switch)

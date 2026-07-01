@@ -1,6 +1,6 @@
 import socket
 from urllib.parse import urlparse
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Literal
 from pydantic import BaseModel, Field, model_validator
 
 class SecurityValidationError(Exception):
@@ -81,7 +81,6 @@ class PauseModel(BaseModel):
     max: int = Field(..., ge=0)
 
 class ExpectModel(BaseModel):
-    # Если статус не указан, по умолчанию ждем 200
     status: List[int] = Field(default=[200])
 
 class RequestModel(BaseModel):
@@ -94,7 +93,6 @@ class RequestModel(BaseModel):
 
     @model_validator(mode='after')
     def validate_get_body(self) -> 'RequestModel':
-        # Проверяем, что у GET-запроса нет тела (body)
         if self.method.upper() == "GET" and self.body is not None:
             raise ValueError("Метод GET не может содержать body.")
         return self
@@ -107,7 +105,7 @@ class StepModel(BaseModel):
 class LimitsModel(BaseModel):
     duration_seconds: int
     max_requests: int
-    max_rps: int = Field(..., le=20) # Тот самый жесткий предел из задания
+    max_rps: int = Field(..., le=20)
     virtual_users: int = Field(..., le=20)
 
 class StopConditionsModel(BaseModel):
@@ -115,9 +113,13 @@ class StopConditionsModel(BaseModel):
     status_429_count: int
     p95_latency_ms: int
 
+class LoadProfileModel(BaseModel):
+    type: Literal["uniform", "stepped", "spike"]
+
 class ScenarioModel(BaseModel):
     name: str
     target: str
+    load_profile: LoadProfileModel
     limits: LimitsModel
     stop_conditions: StopConditionsModel
     steps: List[StepModel]
