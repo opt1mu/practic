@@ -115,6 +115,8 @@ class StopConditionsModel(BaseModel):
 
 class LoadProfileModel(BaseModel):
     type: Literal["uniform", "stepped", "spike"]
+    step_duration_sec: Optional[int] = None
+    step_rps: Optional[int] = None
 
 class ScenarioModel(BaseModel):
     name: str

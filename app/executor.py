@@ -50,25 +50,44 @@ async def worker(client_id: int, scenario: ScenarioModel, session: aiohttp.Clien
             await asyncio.sleep(pause_time)
 
 
-async def rps_scheduler(rps_queue: asyncio.Queue, max_rps: int, duration: int, stop_event: asyncio.Event):
+async def rps_scheduler(rps_queue: asyncio.Queue, scenario: ScenarioModel, stop_event: asyncio.Event):
     start_time = time.time()
-    interval = 1.0 / max_rps
+    duration = scenario.limits.duration_seconds
+    profile = scenario.load_profile
 
-    for i in range(1, int(duration * max_rps) + 1):
+    next_token_time = time.time()
+
+    while (time.time() - start_time) < duration:
         if stop_event.is_set():
             break
 
-        next_time = start_time + (i * interval)
-        sleep_time = next_time - time.time()
+        elapsed = time.time() - start_time
+
+        if profile.type == "stepped":
+            step_duration = profile.step_duration_sec or 5
+            step_increase = profile.step_rps or 2
+            current_step = int(elapsed // step_duration)
+            target_rps = step_increase + (current_step * step_increase)
+            current_rps = min(target_rps, 20)
+        else:
+            current_rps = scenario.limits.max_rps
+
+        interval = 1.0 / current_rps
+        next_token_time += interval
+
+        sleep_time = next_token_time - time.time()
 
         if sleep_time > 0:
             await asyncio.sleep(sleep_time)
+        else:
+            next_token_time = time.time()
 
-        if rps_queue.empty():
-            await rps_queue.put(True)
+        try:
+            rps_queue.put_nowait(True)
+        except asyncio.QueueFull:
+            pass
 
     stop_event.set()
-
 
 async def monitor_performance(duration: int):
     start_time = time.time()
@@ -81,6 +100,7 @@ async def monitor_performance(duration: int):
         print(f"[СТАТИСТИКА] Время: {int(now - start_time)}с | RPS: {len(request_history)}")
         print("-" * 50)
 
+
 async def run_load_test(scenario_path: str):
     with open(scenario_path, 'r', encoding='utf-8') as f:
         scenario = ScenarioModel(**yaml.safe_load(f))
@@ -88,7 +108,7 @@ async def run_load_test(scenario_path: str):
     validator = TargetValidator(allowlist_domains=["127.0.0.1", "localhost"])
     validator.validate_target_url(scenario.target)
 
-    rps_queue = asyncio.Queue(maxsize=1)
+    rps_queue = asyncio.Queue(maxsize=20)
     stop_event = asyncio.Event()
 
     async with aiohttp.ClientSession() as session:
@@ -97,12 +117,12 @@ async def run_load_test(scenario_path: str):
 
         monitor = asyncio.create_task(monitor_performance(scenario.limits.duration_seconds))
 
-        await rps_scheduler(rps_queue, scenario.limits.max_rps, scenario.limits.duration_seconds, stop_event)
+        await rps_scheduler(rps_queue, scenario, stop_event)
+
         await asyncio.gather(*workers)
         monitor.cancel()
 
     print("[*] Тестирование завершено.")
-
 
 if __name__ == "__main__":
     BASE_DIR = Path(__file__).resolve().parent.parent
