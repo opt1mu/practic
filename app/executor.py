@@ -6,6 +6,7 @@ import time
 from collections import deque
 from validator import ScenarioModel, TargetValidator, SecurityValidationError
 from pathlib import Path
+from metrics import MetricsCollector
 
 request_history = deque()
 total_requests = 0
@@ -15,7 +16,8 @@ all_latencies = []
 
 
 async def execute_step(session: aiohttp.ClientSession, target: str, step, client_id: int,
-                       validator: TargetValidator, stop_event: asyncio.Event):
+                       validator: TargetValidator, stop_event: asyncio.Event,
+                       metrics_collector: MetricsCollector, scenario_id: str, context: dict):
     global total_requests, error_requests, status_429_count, all_latencies
 
     url = f"{target}{step.request.path}"
@@ -25,10 +27,12 @@ async def execute_step(session: aiohttp.ClientSession, target: str, step, client
         validator.validate_target_url(url)
     except SecurityValidationError as e:
         print(f"\n[KILL SWITCH] цель перестала проходить проверку allowlist: {e}")
+        context["stop_reason"] = "security_violation"
         stop_event.set()
         return
 
     start_time = time.time()
+    step_id = getattr(step, 'name', step.request.path)
     try:
         async with session.request(
                 method=method,
@@ -38,6 +42,10 @@ async def execute_step(session: aiohttp.ClientSession, target: str, step, client
                 cookies=step.request.cookies,
                 data=step.request.body
         ) as response:
+            body = await response.read()
+            bytes_received = len(body)
+            redirects = len(response.history)
+
             latency = (time.time() - start_time) * 1000
             all_latencies.append(latency)
             request_history.append(time.time())
@@ -53,14 +61,35 @@ async def execute_step(session: aiohttp.ClientSession, target: str, step, client
             else:
                 error_requests += 1
                 print(f"[Клиент {client_id}] [ОШИБКА] {method} {step.request.path} | Статус {status}")
+
+            metrics_collector.add_metric(
+                scenario_id=scenario_id,
+                step_id=step_id,
+                status=status,
+                latency_ms=latency,
+                bytes_received=bytes_received,
+                redirects=redirects,
+                error=None
+            )
     except Exception as e:
         total_requests += 1
         error_requests += 1
         print(f"[Клиент {client_id}] [СЕТЕВАЯ ОШИБКА] {e}")
 
+        metrics_collector.add_metric(
+            scenario_id=scenario_id,
+            step_id=step_id,
+            status=None,
+            latency_ms=None,
+            bytes_received=0,
+            redirects=0,
+            error=str(e)
+        )
+
 
 async def worker(client_id: int, scenario: ScenarioModel, session: aiohttp.ClientSession, rps_queue: asyncio.Queue,
-                 stop_event: asyncio.Event, validator: TargetValidator):
+                 stop_event: asyncio.Event, validator: TargetValidator, metrics_collector: MetricsCollector, context: dict):
+    scenario_id = getattr(scenario, 'name', 'main_scenario')
     while not stop_event.is_set():
         for step in scenario.steps:
             if stop_event.is_set():
@@ -71,14 +100,14 @@ async def worker(client_id: int, scenario: ScenarioModel, session: aiohttp.Clien
             if stop_event.is_set():
                 break
 
-            await execute_step(session, scenario.target, step, client_id, validator, stop_event)
+            await execute_step(session, scenario.target, step, client_id, validator, stop_event, metrics_collector, scenario_id, context)
 
             pause_time = random.randint(step.pause_ms.min, step.pause_ms.max) / 1000.0
             print(f"[Клиент {client_id}] Пауза: {pause_time:.2f} сек.")
             await asyncio.sleep(pause_time)
 
 
-async def rps_scheduler(rps_queue: asyncio.Queue, scenario: ScenarioModel, stop_event: asyncio.Event):
+async def rps_scheduler(rps_queue: asyncio.Queue, scenario: ScenarioModel, stop_event: asyncio.Event, context: dict):
     start_time = time.time()
     duration = scenario.limits.duration_seconds
     profile = scenario.load_profile
@@ -122,10 +151,13 @@ async def rps_scheduler(rps_queue: asyncio.Queue, scenario: ScenarioModel, stop_
         except asyncio.QueueFull:
             pass
 
-    stop_event.set()
+    # если лимит времени теста вышел сам, фиксируем штатное окончание
+    if not stop_event.is_set():
+        context["stop_reason"] = "duration_limit"
+        stop_event.set()
 
 
-async def monitor_performance(scenario: ScenarioModel, stop_event: asyncio.Event):
+async def monitor_performance(scenario: ScenarioModel, stop_event: asyncio.Event, context: dict):
     global total_requests, error_requests, status_429_count, all_latencies
     start_time = time.time()
 
@@ -143,6 +175,8 @@ async def monitor_performance(scenario: ScenarioModel, stop_event: asyncio.Event
         if all_latencies:
             sorted_latencies = sorted(all_latencies)
             p95_index = int(len(sorted_latencies) * 0.95)
+            if p95_index >= len(sorted_latencies):
+                p95_index = len(sorted_latencies) - 1
             p95 = sorted_latencies[p95_index]
 
         print("-" * 50)
@@ -151,21 +185,25 @@ async def monitor_performance(scenario: ScenarioModel, stop_event: asyncio.Event
 
         if total_requests >= scenario.limits.max_requests:
             print(f"\n[KILL SWITCH] достигнут лимит запросов: {total_requests}")
+            context["stop_reason"] = "max_requests_limit"
             stop_event.set()
             break
 
         if total_requests >= 5 and error_rate >= scenario.stop_conditions.error_rate_percent:
             print(f"\n[KILL SWITCH] превышена доля ошибок: {error_rate:.1f}%")
+            context["stop_reason"] = "error_rate_exceeded"
             stop_event.set()
             break
 
         if status_429_count >= scenario.stop_conditions.status_429_count:
             print(f"\n[KILL SWITCH] получено критическое число 429: {status_429_count}")
+            context["stop_reason"] = "status_429_limit_exceeded"
             stop_event.set()
             break
 
         if total_requests >= 5 and p95 >= scenario.stop_conditions.p95_latency_ms:
             print(f"\n[KILL SWITCH] превышена p95-задержка: {p95:.1f}мс")
+            context["stop_reason"] = "p95_latency_exceeded"
             stop_event.set()
             break
 
@@ -180,21 +218,37 @@ async def run_load_test(scenario_path: str):
     rps_queue = asyncio.Queue(maxsize=20)
     stop_event = asyncio.Event()
 
-    async with aiohttp.ClientSession() as session:
-        workers = [asyncio.create_task(worker(i, scenario, session, rps_queue, stop_event, validator))
-                   for i in range(1, scenario.limits.virtual_users + 1)]
+    context = {"stop_reason": "duration_limit"}
 
-        monitor = asyncio.create_task(monitor_performance(scenario, stop_event))
-        scheduler = asyncio.create_task(rps_scheduler(rps_queue, scenario, stop_event))
+    metrics_collector = MetricsCollector(raw_log_path="raw_metrics.jsonl", summary_path="summary_metrics.json")
+    await metrics_collector.start()
 
-        await stop_event.wait()
+    workers = []
+    monitor = None
+    scheduler = None
 
+    try:
+        async with aiohttp.ClientSession() as session:
+            workers = [asyncio.create_task(worker(i, scenario, session, rps_queue, stop_event, validator, metrics_collector, context))
+                       for i in range(1, scenario.limits.virtual_users + 1)]
+
+            monitor = asyncio.create_task(monitor_performance(scenario, stop_event, context))
+            scheduler = asyncio.create_task(rps_scheduler(rps_queue, scenario, stop_event, context))
+
+            await stop_event.wait()
+    except (asyncio.CancelledError, KeyboardInterrupt):
+        context["stop_reason"] = "keyboard_interrupt"
+    finally:
         for w in workers:
             w.cancel()
-        monitor.cancel()
-        scheduler.cancel()
+        if monitor:
+            monitor.cancel()
+        if scheduler:
+            scheduler.cancel()
 
         await asyncio.gather(*workers, monitor, scheduler, return_exceptions=True)
+        # остановка фонового логирования и генерация финального json-отчета
+        await metrics_collector.stop(context["stop_reason"])
 
     print("[*] Тестирование завершено.")
 
