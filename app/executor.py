@@ -17,7 +17,8 @@ all_latencies = []
 
 async def execute_step(session: aiohttp.ClientSession, target: str, step, client_id: int,
                        validator: TargetValidator, stop_event: asyncio.Event,
-                       metrics_collector: MetricsCollector, scenario_id: str, context: dict):
+                       metrics_collector: MetricsCollector, scenario_id: str, context: dict,
+                       scenario: ScenarioModel):
     global total_requests, error_requests, status_429_count, all_latencies
 
     url = f"{target}{step.request.path}"
@@ -56,6 +57,14 @@ async def execute_step(session: aiohttp.ClientSession, target: str, step, client
             if status == 429:
                 status_429_count += 1
 
+            if total_requests >= scenario.limits.max_requests:
+                context["stop_reason"] = "max_requests_limit"
+                stop_event.set()
+
+            if status_429_count >= scenario.stop_conditions.status_429_count:
+                context["stop_reason"] = "status_429_limit_exceeded"
+                stop_event.set()
+
             if status in step.expect.status:
                 print(f"[Клиент {client_id}] [OK] {method} {step.request.path} | Статус {status}")
             else:
@@ -74,6 +83,9 @@ async def execute_step(session: aiohttp.ClientSession, target: str, step, client
     except Exception as e:
         total_requests += 1
         error_requests += 1
+        if total_requests >= scenario.limits.max_requests:
+            context["stop_reason"] = "max_requests_limit"
+            stop_event.set()
         print(f"[Клиент {client_id}] [СЕТЕВАЯ ОШИБКА] {e}")
 
         metrics_collector.add_metric(
@@ -100,7 +112,7 @@ async def worker(client_id: int, scenario: ScenarioModel, session: aiohttp.Clien
             if stop_event.is_set():
                 break
 
-            await execute_step(session, scenario.target, step, client_id, validator, stop_event, metrics_collector, scenario_id, context)
+            await execute_step(session, scenario.target, step, client_id, validator, stop_event, metrics_collector, scenario_id, context, scenario)
 
             pause_time = random.randint(step.pause_ms.min, step.pause_ms.max) / 1000.0
             print(f"[Клиент {client_id}] Пауза: {pause_time:.2f} сек.")
@@ -220,7 +232,7 @@ async def run_load_test(scenario_path: str):
 
     context = {"stop_reason": "duration_limit"}
 
-    metrics_collector = MetricsCollector(raw_log_path="raw_metrics.jsonl", summary_path="summary_metrics.json")
+    metrics_collector = MetricsCollector(raw_log_path="raw_metrics.jsonl", summary_path="summary_protected.json")
     await metrics_collector.start()
 
     workers = []
@@ -250,7 +262,7 @@ async def run_load_test(scenario_path: str):
         # остановка фонового логирования и генерация финального json-отчета
         await metrics_collector.stop(context["stop_reason"])
 
-    print("[*] Тестирование завершено.")
+    print("[*] Тестирование завершено. Причина остановки:", {context.get('stop_reason', 'unknown')})
 
 
 if __name__ == "__main__":

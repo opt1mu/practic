@@ -24,7 +24,7 @@ class MetricsCollector:
 
     async def _write_loop(self):
         # асинцикл чтения очереди и последовательной записи строк в jsonl
-        with open(self.raw_log_path, 'a', encoding='utf-8') as f:
+        with open(self.raw_log_path, 'w', encoding='utf-8') as f:
             while self._is_running or not self.queue.empty():
                 try:
                     # ожидание записи из очереди с таймаутом, чтобы не блокировать завершение
