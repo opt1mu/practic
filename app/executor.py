@@ -41,7 +41,8 @@ async def execute_step(session: aiohttp.ClientSession, target: str, step, client
                 params=step.request.query,
                 headers=step.request.headers,
                 cookies=step.request.cookies,
-                data=step.request.body
+                data=step.request.body,
+                allow_redirects=False
         ) as response:
             body = await response.read()
             bytes_received = len(body)
@@ -53,6 +54,17 @@ async def execute_step(session: aiohttp.ClientSession, target: str, step, client
             total_requests += 1
 
             status = response.status
+
+            if status in (301, 302, 307, 308):
+                redirect_target = response.headers.get("Location")
+                if redirect_target:
+                    try:
+                        validator.validate_target_url(redirect_target)
+                    except SecurityValidationError as e:
+                        print(f"\n[KILL SWITCH] Обнаружен запрещенный внешний редирект: {redirect_target}")
+                        context["stop_reason"] = "security_violation"
+                        stop_event.set()
+                        return
 
             if status == 429:
                 status_429_count += 1
@@ -66,10 +78,10 @@ async def execute_step(session: aiohttp.ClientSession, target: str, step, client
                 stop_event.set()
 
             if status in step.expect.status:
-                print(f"[Клиент {client_id}] [OK] {method} {step.request.path} | Статус {status}")
+                print(f"[Клиент {client_id}] [OK] {method} {step.request.path} | Status {status}")
             else:
                 error_requests += 1
-                print(f"[Клиент {client_id}] [ОШИБКА] {method} {step.request.path} | Статус {status}")
+                print(f"[Клиент {client_id}] [ОШИБКА] {method} {step.request.path} | Status {status}")
 
             metrics_collector.add_metric(
                 scenario_id=scenario_id,
@@ -163,7 +175,6 @@ async def rps_scheduler(rps_queue: asyncio.Queue, scenario: ScenarioModel, stop_
         except asyncio.QueueFull:
             pass
 
-    # если лимит времени теста вышел сам, фиксируем штатное окончание
     if not stop_event.is_set():
         context["stop_reason"] = "duration_limit"
         stop_event.set()
@@ -232,7 +243,7 @@ async def run_load_test(scenario_path: str):
 
     context = {"stop_reason": "duration_limit"}
 
-    metrics_collector = MetricsCollector(raw_log_path="raw_metrics.jsonl", summary_path="summary_2.json")
+    metrics_collector = MetricsCollector(raw_log_path="raw_metrics.jsonl", summary_path="test.json")
     await metrics_collector.start()
 
     workers = []
@@ -259,7 +270,6 @@ async def run_load_test(scenario_path: str):
             scheduler.cancel()
 
         await asyncio.gather(*workers, monitor, scheduler, return_exceptions=True)
-        # остановка фонового логирования и генерация финального json-отчета
         await metrics_collector.stop(context["stop_reason"])
 
     print("[*] Тестирование завершено. Причина остановки:", {context.get('stop_reason', 'unknown')})

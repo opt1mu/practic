@@ -1,0 +1,32 @@
+name: exp5-redirect-blocking
+target: "http://127.0.0.1:8080"
+
+load_profile:
+  type: "uniform"
+  step_duration_sec: 2
+  step_rps: 5
+  spike_start_sec: 10
+  spike_duration_sec: 5
+  spike_rps: 20
+
+limits:
+  duration_seconds: 30
+  max_requests: 50
+  max_rps: 10
+  virtual_users: 2
+
+stop_conditions:
+  error_rate_percent: 100
+  status_429_count: 50
+  p95_latency_ms: 3000
+
+steps:
+  - request:
+      method: GET
+      path: "/redirect-external"
+    expect:
+      status:
+        - 200
+    pause_ms:
+      min: 200
+      max: 400

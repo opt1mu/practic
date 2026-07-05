@@ -1,0 +1,35 @@
+name: exp2-nginx-rate-limiting
+target: "http://127.0.0.1:8080"
+
+load_profile:
+  type: "uniform"
+  step_duration_sec: 2
+  step_rps: 5
+  spike_start_sec: 10
+  spike_duration_sec: 5
+  spike_rps: 20
+
+limits:
+  duration_seconds: 15
+  max_requests: 150
+  max_rps: 15
+  virtual_users: 8
+
+stop_conditions:
+  error_rate_percent: 100
+  status_429_count: 200
+  p95_latency_ms: 3000
+
+steps:
+  - request:
+      method: GET
+      path: "/limited"
+      headers:
+        Accept: "application/json"
+    expect:
+      status:
+        - 200
+        - 429
+    pause_ms:
+      min: 100
+      max: 300
