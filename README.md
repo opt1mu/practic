@@ -26,14 +26,20 @@
 - test_kill_switch.py - Тесты для проверки срабатывания kill switch
 - test_security.py - Тесты на прохождение валидации для validate.py
 
-#### dummy_server.py - Базовый сервер-заглушка
-#### dummy_server_protected.py - Локальный сервер с эмуляцией Rate Limiting
-#### compare.py - Утилита дифференциального анализа и сравнения отчетов с выводом таблицы.
+#### dummy_server.py 
+- Базовый сервер-заглушка
+#### dummy_server_protected.py 
+- Локальный сервер с эмуляцией Rate Limiting
+#### compare.py 
+- Утилита дифференциального анализа и сравнения отчетов с выводом таблицы.
 
 
 ### Формат запуска:
 В одном терминале тестирование с клиентами, в другом - сервер (в итоговой версии - сервер в докере).
-Доступные команды: validate, dry-run, run, compare, stop
+
+#### Доступные команды: 
+validate, dry-run, run, compare, stop
+
 '''
 python app/main.py <команда> scenarios/<сценарий.yaml>   #для validate, dry-run и run
 
