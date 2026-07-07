@@ -243,7 +243,7 @@ async def run_load_test(scenario_path: str):
 
     context = {"stop_reason": "duration_limit"}
 
-    metrics_collector = MetricsCollector(raw_log_path="raw_metrics.jsonl", summary_path="test.json")
+    metrics_collector = MetricsCollector(raw_log_path="raw_metrics.jsonl", summary_path="test2.json")
     await metrics_collector.start()
 
     workers = []
