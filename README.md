@@ -41,10 +41,12 @@
 validate, dry-run, run, compare, stop
 
 '''
+
 python app/main.py <команда> scenarios/<сценарий.yaml>   #для validate, dry-run и run
 
 python app/main.py <команда> <файл_1.json> <файл_2.json>   #для compare
 
 python app/main.py <команда>   #для stop в другом терминале
+
 '''
 
